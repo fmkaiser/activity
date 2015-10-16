@@ -26,6 +26,7 @@ use OC\Files\Filesystem;
 use OC\Files\View;
 use OCA\Activity\Extension\Files;
 use OCA\Activity\Extension\Files_Sharing;
+use OCP\Activity\IExtension;
 use OCP\Activity\IManager;
 use OCP\Files\Mount\IMountPoint;
 use OCP\Files\NotFoundException;
@@ -131,7 +132,7 @@ class FilesHooks {
 	}
 
 	/**
-	 * Store the restore hook events
+	 * Collect some information about the current rename/move
 	 * @param string $beforePath Path of the file before the rename
 	 * @param string $afterPath Path of the file after the rename
 	 */
@@ -139,7 +140,15 @@ class FilesHooks {
 		$beforeParentDir = dirname($beforePath);
 		$afterParentDir = dirname($afterPath);
 
-		if ($beforeParentDir === $afterParentDir) {
+		$this->view->chroot('/' . $this->currentUser . '/files');
+		$absolutePath = $this->view->getAbsolutePath($beforePath);
+		$mountPoint = $this->view->getMountPoint($beforePath);
+
+		if (rtrim($absolutePath, '/') === rtrim($mountPoint, '/')) {
+			// Mount point was renamed, so only the current user should get an
+			// activity, because no one else sees the change.
+			$this->renameMode = 'mountpoint_rename';
+		} else if ($beforeParentDir === $afterParentDir) {
 			// File/folder renamed, not moved, so all users that had access
 			// before also have access afterwards.
 			$this->renameMode = 'file_rename';
@@ -147,17 +156,44 @@ class FilesHooks {
 	}
 
 	/**
-	 * Store the restore hook events
+	 * Store the rename hook events
 	 * @param string $beforePath Path of the file before the rename
 	 * @param string $afterPath Path of the file after the rename
 	 */
 	public function fileRename($beforePath, $afterPath) {
-		if ($this->renameMode === 'file_rename') {
-			// ToDo: If someone renames a shared item, we shouldn't trigger activities for the owner and others,
-			// just for the current user
+
+		if ($this->renameMode === 'mountpoint_rename') {
+			$this->renameMountPoint($beforePath, $afterPath);
+		} else if ($this->renameMode === 'file_rename') {
 			$beforeFileName = basename($beforePath);
 			$this->addNotificationsForFileAction($afterPath, Files::TYPE_SHARE_RENAMED, 'renamed_self', 'renamed_by', [$beforeFileName]);
 		}
+	}
+
+	/**
+	 * User renames a mount point
+	 *
+	 * @param string $beforePath
+	 * @param string $afterPath
+	 */
+	protected function renameMountPoint($beforePath, $afterPath) {
+		$this->view->chroot('/' . $this->currentUser . '/files');
+		$fileInfo = $this->view->getFileInfo($afterPath);
+		$beforeFileName = basename($beforePath);
+
+		$mailSetting = $this->userSettings->getUserSetting($this->currentUser, IExtension::METHOD_MAIL, Files::TYPE_SHARE_RENAMED);
+		if ($mailSetting) {
+			$mailSetting = $this->userSettings->getUserSetting($this->currentUser, 'setting', 'batchtime');
+		} else {
+			$mailSetting = 0;
+		}
+		$this->addNotificationsForUser(
+			$this->currentUser, 'renamed_self', [$afterPath, $beforeFileName],
+			$fileInfo->getId(), $afterPath, $this->view->is_dir($afterPath),
+			$this->userSettings->getUserSetting($this->currentUser, IExtension::METHOD_STREAM, Files::TYPE_SHARE_RENAMED),
+			$mailSetting,
+			Files::TYPE_SHARE_RENAMED
+		);
 	}
 
 	/**

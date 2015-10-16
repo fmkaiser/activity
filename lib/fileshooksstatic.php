@@ -28,6 +28,9 @@ use OCP\Util;
  * The class to handle the filesystem hooks
  */
 class FilesHooksStatic {
+	/** @var FilesHooks */
+	static protected $instance;
+
 	/**
 	 * Registers the filesystem hooks for basic filesystem operations.
 	 * All other events has to be triggered by the apps.
@@ -36,6 +39,8 @@ class FilesHooksStatic {
 		Util::connectHook('OC_Filesystem', 'post_create', 'OCA\Activity\FilesHooksStatic', 'fileCreate');
 		Util::connectHook('OC_Filesystem', 'post_update', 'OCA\Activity\FilesHooksStatic', 'fileUpdate');
 		Util::connectHook('OC_Filesystem', 'delete', 'OCA\Activity\FilesHooksStatic', 'fileDelete');
+		Util::connectHook('OC_Filesystem', 'rename', 'OCA\Activity\FilesHooksStatic', 'fileRenameBefore');
+		Util::connectHook('OC_Filesystem', 'post_rename', 'OCA\Activity\FilesHooksStatic', 'fileRename');
 		Util::connectHook('\OCA\Files_Trashbin\Trashbin', 'post_restore', 'OCA\Activity\FilesHooksStatic', 'fileRestore');
 		Util::connectHook('OCP\Share', 'post_shared', 'OCA\Activity\FilesHooksStatic', 'share');
 
@@ -47,8 +52,12 @@ class FilesHooksStatic {
 	 * @return FilesHooks
 	 */
 	static protected function getHooks() {
-		$app = new AppInfo\Application();
-		return $app->getContainer()->query('Hooks');
+		if (self::$instance === null) {
+			$app = new AppInfo\Application();
+			self::$instance = $app->getContainer()->query('Hooks');
+		}
+		return self::$instance;
+
 	}
 
 	/**
@@ -81,6 +90,22 @@ class FilesHooksStatic {
 	 */
 	public static function fileRestore($params) {
 		self::getHooks()->fileRestore($params['filePath']);
+	}
+
+	/**
+	 * Store the rename hook events
+	 * @param array $params The hook params
+	 */
+	public static function fileRenameBefore($params) {
+		self::getHooks()->fileRenameBefore($params['oldpath'], $params['newpath']);
+	}
+
+	/**
+	 * Store the rename hook events
+	 * @param array $params The hook params
+	 */
+	public static function fileRename($params) {
+		self::getHooks()->fileRename($params['oldpath'], $params['newpath']);
 	}
 
 	/**

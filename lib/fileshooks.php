@@ -63,6 +63,9 @@ class FilesHooks {
 	/** @var string|false */
 	protected $currentUser;
 
+	/** @var string */
+	protected $renameMode;
+
 	/**
 	 * Constructor
 	 *
@@ -128,14 +131,45 @@ class FilesHooks {
 	}
 
 	/**
+	 * Store the restore hook events
+	 * @param string $beforePath Path of the file before the rename
+	 * @param string $afterPath Path of the file after the rename
+	 */
+	public function fileRenameBefore($beforePath, $afterPath) {
+		$beforeParentDir = dirname($beforePath);
+		$afterParentDir = dirname($afterPath);
+
+		if ($beforeParentDir === $afterParentDir) {
+			// File/folder renamed, not moved, so all users that had access
+			// before also have access afterwards.
+			$this->renameMode = 'file_rename';
+		}
+	}
+
+	/**
+	 * Store the restore hook events
+	 * @param string $beforePath Path of the file before the rename
+	 * @param string $afterPath Path of the file after the rename
+	 */
+	public function fileRename($beforePath, $afterPath) {
+		if ($this->renameMode === 'file_rename') {
+			// ToDo: If someone renames a shared item, we shouldn't trigger activities for the owner and others,
+			// just for the current user
+			$beforeFileName = basename($beforePath);
+			$this->addNotificationsForFileAction($afterPath, Files::TYPE_SHARE_RENAMED, 'renamed_self', 'renamed_by', [$beforeFileName]);
+		}
+	}
+
+	/**
 	 * Creates the entries for file actions on $file_path
 	 *
 	 * @param string $filePath         The file that is being changed
 	 * @param int    $activityType     The activity type
 	 * @param string $subject          The subject for the actor
 	 * @param string $subjectBy        The subject for other users (with "by $actor")
+	 * @param array $additionalArguments
 	 */
-	protected function addNotificationsForFileAction($filePath, $activityType, $subject, $subjectBy) {
+	protected function addNotificationsForFileAction($filePath, $activityType, $subject, $subjectBy, array $additionalArguments = []) {
 		// Do not add activities for .part-files
 		if (substr($filePath, -5) === '.part') {
 			return;
@@ -158,6 +192,8 @@ class FilesHooks {
 				$userSubject = $subjectBy;
 				$userParams = [[$fileId => $path], $this->currentUser];
 			}
+
+			$userParams = array_merge($userParams, $additionalArguments);
 
 			$this->addNotificationsForUser(
 				$user, $userSubject, $userParams,
